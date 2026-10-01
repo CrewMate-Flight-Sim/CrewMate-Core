@@ -12,6 +12,11 @@ pub fn is_in_cockpit() -> bool {
     IN_COCKPIT.load(Ordering::Relaxed)
 }
 
+#[tauri::command]
+pub fn get_in_cockpit() -> bool {
+    is_in_cockpit()
+}
+
 #[repr(C)]
 #[derive(Debug, Clone)]
 struct CameraState {

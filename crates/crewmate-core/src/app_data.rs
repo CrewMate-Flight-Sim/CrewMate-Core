@@ -1,11 +1,10 @@
 use tauri::AppHandle;
 use tauri::Manager;
 
-/// Name of the logs folder inside the app data directory, and the base name of
-/// the rolling log file. Shared with the logging plugin set up in `lib.rs` so
-/// "open log file" can never point somewhere the logger is not writing.
+use crate::Config;
+
+// Shared with the logging plugin in lib.rs, so "open log file" can't drift from where the logger writes
 pub const LOGS_DIR_NAME: &str = "logs";
-pub const LOG_FILE_STEM: &str = "crewmateinia350";
 
 #[tauri::command]
 pub fn setup_app_data_directories(app_handle: &tauri::AppHandle) -> tauri::Result<()> {
@@ -28,7 +27,8 @@ pub async fn get_log_file_path(app_handle: AppHandle) -> Result<String, String> 
         .map_err(|e| e.to_string())?
         .join(LOGS_DIR_NAME);
 
-    let log_file_path = logs_dir.join(format!("{LOG_FILE_STEM}.log"));
+    let log_file_stem = app_handle.state::<Config>().log_file_stem;
+    let log_file_path = logs_dir.join(format!("{log_file_stem}.log"));
     Ok(log_file_path.to_string_lossy().to_string())
 }
 

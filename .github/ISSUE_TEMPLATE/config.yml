@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: CrewMate A350 bug or idea
+    url: https://github.com/CrewMate-Flight-Sim/CrewMateA350/issues
+    about: Problems using an app are reported in that aircraft's repo
+  - name: CrewMate A310 bug or idea
+    url: https://github.com/CrewMate-Flight-Sim/CrewMateA310/issues
+    about: Problems using an app are reported in that aircraft's repo
+  - name: CrewMate MD-11 bug or idea
+    url: https://github.com/CrewMate-Flight-Sim/CrewMateMD11/issues
+    about: Problems using an app are reported in that aircraft's repo

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::SPEECH_BRIDGE_STATE;
+use crate::bridges::speech_bridge::SPEECH_BRIDGE_STATE;
 use joystick::Joysticks;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);

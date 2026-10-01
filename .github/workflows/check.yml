@@ -1,0 +1,19 @@
+name: check
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compiling needs the MSFS SDK, which hosted runners don't have; contributors run check and clippy locally
+      - name: Check formatting
+        run: cargo fmt --all --check

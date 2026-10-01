@@ -122,7 +122,7 @@ pub fn set_output_device(app_handle: AppHandle, device: Option<String>) -> Resul
 #[tauri::command]
 pub fn set_input_device(app_handle: AppHandle, device: Option<String>) -> Result<(), String> {
     log::info!("[Audio] Input device set: {:?}", device);
-    let state = app_handle.state::<crate::SpeechBridgeState>();
+    let state = app_handle.state::<crate::bridges::speech_bridge::SpeechBridgeState>();
     state.inner().bridge.restart_with_device(device);
     Ok(())
 }

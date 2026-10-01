@@ -7,8 +7,29 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::{AppState, WorkerRequest};
 use tauri::Emitter;
+
+pub struct SimVarState {
+    pub tx: Mutex<mpsc::Sender<WorkerRequest>>,
+}
+
+pub enum WorkerRequest {
+    Set {
+        variable_string: String,
+        respond_to: mpsc::Sender<Result<(), String>>,
+    },
+    Get {
+        variable_string: String,
+        respond_to: mpsc::Sender<Result<Option<f32>, String>>,
+    },
+    StartStream {
+        variables: Vec<TelemetryVariable>,
+        interval_ms: u64,
+        app_handle: tauri::AppHandle,
+        respond_to: mpsc::Sender<Result<(), String>>,
+    },
+    StopStream(mpsc::Sender<Result<(), String>>),
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TelemetryVariable {
@@ -466,7 +487,7 @@ fn on_tick(sim: &mut Option<SimVars>, stream: &Option<StreamState>) {
 
 #[tauri::command]
 pub fn simvar_set(
-    state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, SimVarState>,
     variable_string: String,
 ) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
@@ -486,7 +507,7 @@ pub fn simvar_set(
 
 #[tauri::command]
 pub fn simvar_get(
-    state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, SimVarState>,
     variable_string: String,
 ) -> Result<Option<f32>, String> {
     let (tx, rx) = mpsc::channel();
@@ -506,7 +527,7 @@ pub fn simvar_get(
 
 #[tauri::command]
 pub fn start_telemetry_stream(
-    state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, SimVarState>,
     app_handle: tauri::AppHandle,
     variables: Vec<TelemetryVariable>,
     interval_ms: u64,
@@ -529,7 +550,7 @@ pub fn start_telemetry_stream(
 }
 
 #[tauri::command]
-pub fn stop_telemetry_stream(state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub fn stop_telemetry_stream(state: tauri::State<'_, SimVarState>) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
     state
         .inner()

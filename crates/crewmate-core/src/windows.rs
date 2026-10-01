@@ -1,10 +1,10 @@
-use crate::SpeechBridgeState;
+use crate::bridges::speech_bridge::SpeechBridgeState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Helper function to create a modal window centered on the main window
-fn create_modal_window(
+pub fn create_modal_window(
     app_handle: &AppHandle,
     label: &str,
     url: &str,
@@ -72,45 +72,6 @@ pub async fn set_always_on_top(app_handle: AppHandle, always_on_top: bool) -> Re
             .map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-#[tauri::command]
-pub async fn open_takeoff_window(app_handle: AppHandle) -> Result<(), String> {
-    create_modal_window(
-        &app_handle,
-        "takeoff",
-        "src/windows/takeoff/takeoff.html",
-        "Takeoff Plan",
-        350.0,
-        255.0,
-        false,
-    )
-}
-
-#[tauri::command]
-pub async fn open_landing_window(app_handle: AppHandle) -> Result<(), String> {
-    create_modal_window(
-        &app_handle,
-        "landing",
-        "src/windows/landing/landing.html",
-        "Landing Plan",
-        350.0,
-        250.0,
-        false,
-    )
-}
-
-#[tauri::command]
-pub async fn open_settings_window(app_handle: AppHandle) -> Result<(), String> {
-    create_modal_window(
-        &app_handle,
-        "settings",
-        "src/windows/settings/settings.html",
-        "Settings",
-        385.0,
-        640.0,
-        false,
-    )
 }
 
 #[tauri::command]

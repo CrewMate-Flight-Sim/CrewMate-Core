@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::Emitter;
 use tauri::Manager;
@@ -199,6 +199,13 @@ impl SidecarShared {
 pub struct SpeechBridge {
     shared: SidecarShared,
 }
+
+pub struct SpeechBridgeState {
+    pub bridge: Arc<SpeechBridge>,
+}
+
+// Read by the panic hook and PTT input, which run outside Tauri's managed state
+pub static SPEECH_BRIDGE_STATE: OnceLock<Arc<SpeechBridge>> = OnceLock::new();
 
 impl SpeechBridge {
     pub fn new(app_handle: tauri::AppHandle) -> Self {
@@ -581,7 +588,27 @@ fn handle_stdout_line(line: &[u8], shared: &SidecarShared) {
 
 #[tauri::command]
 pub fn get_speech_input_devices(
-    state: tauri::State<'_, crate::SpeechBridgeState>,
+    state: tauri::State<'_, SpeechBridgeState>,
 ) -> Vec<SpeechInputDevice> {
     state.inner().bridge.get_input_devices()
+}
+
+#[tauri::command]
+pub fn get_speech_engine_error(state: tauri::State<'_, SpeechBridgeState>) -> Option<String> {
+    state.inner().bridge.last_error()
+}
+
+#[tauri::command]
+pub fn set_confidence_threshold(state: tauri::State<'_, SpeechBridgeState>, threshold: f32) {
+    let safe_threshold = if threshold.is_finite() {
+        threshold.clamp(0.0, 1.0)
+    } else {
+        log::warn!(
+            "[Speech] Received non-finite confidence threshold: {:?}, using default 0.85",
+            threshold
+        );
+        0.85
+    };
+    let json = format!(r#"{{"confidenceThreshold":{:.3}}}"#, safe_threshold);
+    state.inner().bridge.send_config(&json);
 }

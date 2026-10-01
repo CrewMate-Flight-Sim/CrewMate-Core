@@ -1,115 +1,67 @@
-use std::sync::{mpsc, Arc, Mutex};
-mod audio;
-use audio::commands::{
-    get_sound_packs, is_audio_playing, play_sound, play_sound_sequence, AudioPlayerState,
-};
-use audio::devices::{
-    get_available_input_devices, get_available_output_devices, set_input_device, set_output_device,
-};
-use audio::player::AudioPlayer;
-use bridges::speech_bridge::get_speech_input_devices;
-use tauri_plugin_window_state::StateFlags;
-
-mod bridges;
-use bridges::speech_bridge::SpeechBridge;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tauri::Manager;
+use tauri_plugin_window_state::StateFlags;
 
-use simconnect::simvars::{
-    simvar_get, simvar_set, spawn_simvar_worker, start_telemetry_stream, stop_telemetry_stream,
-    TelemetryVariable,
-};
+pub mod app_data;
+pub mod audio;
+pub mod bridges;
+pub mod input;
+pub mod simconnect;
+pub mod windows;
 
-mod app_data;
-use app_data::{
-    get_log_file_path, open_app_data_folder, open_logs_folder, setup_app_data_directories,
-    LOGS_DIR_NAME, LOG_FILE_STEM,
-};
+use app_data::{setup_app_data_directories, LOGS_DIR_NAME};
+use audio::commands::AudioPlayerState;
+use audio::player::AudioPlayer;
+use bridges::speech_bridge::{SpeechBridge, SpeechBridgeState, SPEECH_BRIDGE_STATE};
+use simconnect::aircraft_title::start_aircraft_title_stream;
+use simconnect::flight_state::start_flight_state_stream;
+use simconnect::simvars::{spawn_simvar_worker, SimVarState};
 
-mod simconnect;
-use simconnect::aircraft_title::{get_aircraft_title, start_aircraft_title_stream};
-use simconnect::flight_state::{is_in_cockpit, start_flight_state_stream};
+pub use windows::create_modal_window;
 
-#[tauri::command]
-fn get_in_cockpit() -> bool {
-    is_in_cockpit()
+pub type AppSetup = fn(&mut tauri::App) -> Result<(), Box<dyn std::error::Error>>;
+
+/// What differs between aircraft apps; everything else in the shell is shared.
+#[derive(Clone, Copy)]
+pub struct Config {
+    /// Shown in the "application loaded" log line, e.g. "Crewmate INI A350".
+    pub app_name: &'static str,
+    /// Base name of the log file, e.g. "crewmateinia350". Frozen per app: users send this file.
+    pub log_file_stem: &'static str,
+    /// Window labels the window-state plugin must not restore (the app's modal windows).
+    pub modal_windows: &'static [&'static str],
+    /// The app's own setup, run after core's.
+    pub setup: Option<AppSetup>,
 }
 
-#[tauri::command]
-fn get_speech_engine_error(state: tauri::State<'_, SpeechBridgeState>) -> Option<String> {
-    state.inner().bridge.last_error()
+/// Kills the speech sidecar on a panic from any thread; call first thing in `main`.
+pub fn install_panic_hook() {
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        if let Some(speech) = SPEECH_BRIDGE_STATE.get() {
+            speech.shutdown();
+        }
+        prev_hook(panic_info);
+    }));
 }
 
-#[tauri::command]
-fn set_confidence_threshold(state: tauri::State<'_, SpeechBridgeState>, threshold: f32) {
-    let safe_threshold = if threshold.is_finite() {
-        threshold.clamp(0.0, 1.0)
-    } else {
-        log::warn!(
-            "[Speech] Received non-finite confidence threshold: {:?}, using default 0.85",
-            threshold
-        );
-        0.85
-    };
-    let json = format!(r#"{{"confidenceThreshold":{:.3}}}"#, safe_threshold);
-    state.inner().bridge.send_config(&json);
-}
-
-mod input;
-use input::{
-    cancel_input_capture, set_mic_bindings, set_muted, set_voice_mode, start_input_capture,
-};
-
-mod windows;
-use crate::windows::{
-    close_app, open_landing_window, open_settings_window, open_takeoff_window, set_always_on_top,
-};
-
-struct AppState {
-    tx: Mutex<mpsc::Sender<WorkerRequest>>,
-}
-
-pub struct SpeechBridgeState {
-    pub bridge: Arc<SpeechBridge>,
-}
-
-enum WorkerRequest {
-    Set {
-        variable_string: String,
-        respond_to: mpsc::Sender<Result<(), String>>,
-    },
-    Get {
-        variable_string: String,
-        respond_to: mpsc::Sender<Result<Option<f32>, String>>,
-    },
-    StartStream {
-        variables: Vec<TelemetryVariable>,
-        interval_ms: u64,
-        app_handle: tauri::AppHandle,
-        respond_to: mpsc::Sender<Result<(), String>>,
-    },
-    StopStream(mpsc::Sender<Result<(), String>>),
-}
-
-use std::sync::OnceLock;
-
-pub static SPEECH_BRIDGE_STATE: OnceLock<Arc<SpeechBridge>> = OnceLock::new();
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+/// The app's Tauri builder with every plugin, state and background stream set up.
+/// The app adds `.invoke_handler(crewmate_core::handler![…])` and runs it.
+pub fn builder(config: Config) -> tauri::Builder<tauri::Wry> {
     #[cfg(debug_assertions)]
     std::env::set_var(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
         "--remote-debugging-port=9222",
     );
     let worker_tx = spawn_simvar_worker();
-    let builder = tauri::Builder::default()
+    tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
-                .with_denylist(&["takeoff", "landing", "settings"])
+                .with_denylist(config.modal_windows)
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
@@ -122,7 +74,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_prevent_default::debug())
-        .setup(|app| {
+        .setup(move |app| {
+            app.manage(config);
+
             // Initialize speech recognition sidecar
             let speech = Arc::new(SpeechBridge::new(app.handle().clone()));
             SPEECH_BRIDGE_STATE.set(speech.clone()).ok();
@@ -142,7 +96,7 @@ pub fn run() {
             app.manage(AudioPlayerState(std::sync::Mutex::new(audio_player)));
 
             // Initialize SimVar worker
-            app.manage(AppState {
+            app.manage(SimVarState {
                 tx: Mutex::new(worker_tx),
             });
 
@@ -171,7 +125,7 @@ pub fn run() {
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Folder {
                         path: logs_dir,
-                        file_name: Some(LOG_FILE_STEM.to_string()),
+                        file_name: Some(config.log_file_stem.to_string()),
                     },
                 ))
                 .level(log::LevelFilter::Info)
@@ -181,7 +135,7 @@ pub fn run() {
                 .plugin(log_plugin)
                 .expect("Failed to initialize logging plugin");
 
-            log::info!("[App] Crewmate INI A350 application loaded...");
+            log::info!("[App] {} application loaded...", config.app_name);
 
             if let Err(e) = setup_app_data_directories(app.handle()) {
                 log::error!("[App] Failed to setup app data directories: {}", e);
@@ -210,42 +164,48 @@ pub fn run() {
                 });
             }
 
+            if let Some(app_setup) = config.setup {
+                app_setup(app)?;
+            }
+
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            close_app,
-            open_landing_window,
-            open_settings_window,
-            open_takeoff_window,
-            set_always_on_top,
-            get_log_file_path,
-            open_app_data_folder,
-            open_logs_folder,
-            simvar_set,
-            simvar_get,
-            start_telemetry_stream,
-            stop_telemetry_stream,
-            play_sound,
-            play_sound_sequence,
-            is_audio_playing,
-            get_sound_packs,
-            get_available_input_devices,
-            get_available_output_devices,
-            set_output_device,
-            set_input_device,
-            get_aircraft_title,
-            get_in_cockpit,
-            get_speech_engine_error,
-            set_confidence_threshold,
-            get_speech_input_devices,
-            set_muted,
-            set_voice_mode,
-            set_mic_bindings,
-            start_input_capture,
-            cancel_input_capture
-        ]);
+}
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+/// Every core command plus the app's own, for `.invoke_handler(…)`:
+/// `crewmate_core::handler![windows::open_settings_window, …]`.
+#[macro_export]
+macro_rules! handler {
+    ($($app_commands:tt)*) => {
+        ::tauri::generate_handler![
+            $crate::windows::close_app,
+            $crate::windows::set_always_on_top,
+            $crate::app_data::get_log_file_path,
+            $crate::app_data::open_app_data_folder,
+            $crate::app_data::open_logs_folder,
+            $crate::simconnect::simvars::simvar_set,
+            $crate::simconnect::simvars::simvar_get,
+            $crate::simconnect::simvars::start_telemetry_stream,
+            $crate::simconnect::simvars::stop_telemetry_stream,
+            $crate::audio::commands::play_sound,
+            $crate::audio::commands::play_sound_sequence,
+            $crate::audio::commands::is_audio_playing,
+            $crate::audio::commands::get_sound_packs,
+            $crate::audio::devices::get_available_input_devices,
+            $crate::audio::devices::get_available_output_devices,
+            $crate::audio::devices::set_output_device,
+            $crate::audio::devices::set_input_device,
+            $crate::simconnect::aircraft_title::get_aircraft_title,
+            $crate::simconnect::flight_state::get_in_cockpit,
+            $crate::bridges::speech_bridge::get_speech_engine_error,
+            $crate::bridges::speech_bridge::set_confidence_threshold,
+            $crate::bridges::speech_bridge::get_speech_input_devices,
+            $crate::input::set_muted,
+            $crate::input::set_voice_mode,
+            $crate::input::set_mic_bindings,
+            $crate::input::start_input_capture,
+            $crate::input::cancel_input_capture,
+            $($app_commands)*
+        ]
+    };
 }
