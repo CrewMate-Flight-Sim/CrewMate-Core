@@ -33,7 +33,7 @@ cargo check
    [patch."https://github.com/CrewMate-Flight-Sim/CrewMate-Core"]
    crewmate-core = { path = "../../CrewMate-Core/crates/crewmate-core" }
    ```
-   Then run `npm run tauri dev` in the app. It builds against your checkout instead of the pinned tag. Exercise what you changed and read the app log. Delete the file afterwards; the next build goes back to the pinned version. A build made this way is for testing only.
+   Then run `npm run tauri dev` in the app. It builds against your checkout instead of the pinned tag. Exercise what you changed and read the app log. While the file exists, the app's `Cargo.lock` points at your local path, so don't commit it in that state. Delete the file afterwards; the next build goes back to the pinned version. A build made this way is for testing only.
 5. Open a PR. Describe what changed and how you tested it, and in which app. CI checks the formatting; it can't compile without the MSFS SDK, so the PR checklist asks you to confirm the local checks passed.
 
 If your change also needs code in an aircraft app (for example, the frontend reading a new event), open that app's PR too and write "needs CrewMate-Core vX.Y.Z" in it. It gets merged once the core version is tagged.
