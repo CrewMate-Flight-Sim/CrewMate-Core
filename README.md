@@ -4,10 +4,7 @@ The shared backend of the CrewMate aircraft apps ([A350](https://github.com/Crew
 
 This is a build-time library, not a product. Each aircraft app is a separate product with its own installer, version, release schedule and updater. Each one pins an exact version of this repo and moves to a newer one whenever its own release is ready. Users never see this repo; bugs are reported in the aircraft repos.
 
-What's here today:
-
-- `crates/crewmate-core`: the Rust side of the Tauri app.
-- A TypeScript package for the shared frontend code will join this repo later, at the repository root.
+What's here: `crates/crewmate-core`, the Rust side of the Tauri app. The frontend stays in each app, because most of it is aircraft-specific.
 
 ## What core owns
 
